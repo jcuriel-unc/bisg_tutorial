@@ -192,8 +192,19 @@ head(police$last_name)
 When employing BISG, we want the geographic information to be preferably at the level of Census Block Group, which is the most precise data that is also updated via 5-year American Community Survey (ACS). In the event that we do not have geocoding, we can rely upon ZIP codes. Where ZIP codes are not an option, finally county. 
 
 ```{r pressure, echo=FALSE}
+sum(is.na(police$Victim.s.race))
+unique(police$Victim.s.race)
+length(which(police$Victim.s.race=="Unknown race")) # around 10 % 
 
+## check for officer's name and then race 
+sum(is.na(police$Names.of.Officers.Involved..DRAFT.))
+#sort(unique(police$Names.of.Officers.Involved..DRAFT.)) # something like 1800 officers 
+#table(police$Race.of.Officers.Involved..DRAFT.)
+### take one of the rows 
 
+off_names <- strsplit(police$Names.of.Officers.Involved..DRAFT.[26], ",") 
+off_names <- unlist(off_names) # worked 
+str(off_names)
 
 ```
 
