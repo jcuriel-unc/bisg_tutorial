@@ -16,7 +16,7 @@ The first step when employing BISG is to install the relevant packages. For BISG
 ### check for packages 
 pkg <- c("stringr","stringi","tidyverse","foreign","conflicted","data.table","raster","gtools","rgdal",
          "ggplot2","ggpubr","rstudioapi","rgeos","scales","splitstackshape",
-         "tidyr","devtools", "sf", "geojsonio","lme4","arm","MASS")
+         "tidyr","devtools", "sf", "geojsonio","lme4","arm","MASS","knitr")
 
 for (i in pkg){
   print(i)
@@ -74,6 +74,7 @@ library(sf) # simple features for spatial objects
 library(lme4)
 library(arm)
 library(MASS)
+library(knitr)
 ##install the arealOverlap pkg 
 #devtools::install_github("https://github.com/jcuriel-unc/arealOverlap2",subdir="arealOverlap")
 #library(arealOverlap)
@@ -478,6 +479,49 @@ overall_race_diff
 
 
 ```
+## Analyzing the precision rate
+
+We ultimately care about the precision rating, or the true positive over the positives. We want to know the probability that one is of race i, given that the BISG predicted probability assigns them race i.^[As I discuss elswhere (Clark, Curiel, Steelman, 2021; DeLuca and Curiel 2022; Curiel and DeLuca 2024) it is important to be cautious in applying the maximum posterior, i.e. plurality estimate of BISG. We lose information by not weighting the data by the confidence of the estimate. However, the dichotomous nature of categorization to a given category and prevalence of the precision statistic makes such analyses as will follow a measure of utility in ascertaining the validity of BISG to Mapping Police Violence.] We see in the results below, the results are fairly strong. The precision proceeds in the order of Hispanic, Black, White, Asian/PI, and Other. 
+
+The highest rating for Hispanics sees a precision rating of approximately 85 percent given the BISG assigned race, with most of the error arising from 8.9 percent of Hispanics assigned incorrectly as White.^[Note, it is common for Hispanics to identify as White, and one critique of the wru set up is that Hispanic is treated as zero-sum relative to the other racial categories. Such assignment is largely an artifact of the British conception of race.] African-Americans in turn see 80.4 percent correct matching, with the error almost entirely arising with the 17.3 percent of the time when the race should be White. White victims in turn see approximately 75 percent correct identification, with most of the error arising in approximately 19 percent of the time when the victim should be coded as African American. Both Asian/Pacific Islanders and victims that fall into the "Other" category see a greater distribution of error. While nearly 69 percent of the time the BISG assigned category of Asian-Pacific Islander is correct, the assignment is in error 15.7 percent of the time for Whites, which is equivalent to the aggregated error for African Americans, Hispanics, and Other. The category of "Other" for police violence victims -- which comprises mostly Native Americans -- sees the greatest amount of noise, with only correct assignment 40.4 percent of the time. These results suggest special caution in missing the toll of police violence on Native Americans, and perhaps alternative BISG methodologies for these purposes.  
+
+```{r precision}
+
+### use the herfindahl fxn to get plural race 
+police_df_slim_final <- race_herfindahl_scores2(police_df_slim_final)
+
+
+### collapse the data 
+police_df_slim_final_col <- police_df_slim_final %>%
+  group_by(plural_race,race_simp) %>%
+  tally()
+### get total 
+total_num <- sum(police_df_slim_final_col$n)
+## get pcts; mutate
+police_df_slim_final_col <- police_df_slim_final_col %>%
+  group_by(plural_race) %>%
+  mutate(plural_sum=sum(n))
+police_df_slim_final_col$pct <- round((police_df_slim_final_col$n/police_df_slim_final_col$plural_sum)*100,1)
+
+
+
+### let's create a ggplot 
+overall_precision_plot <- ggplot(police_df_slim_final_col, aes(fill=race_simp, y=pct, x=plural_race, label = (pct))) + 
+    geom_bar(position="dodge", stat="identity") + theme_minimal() +ylim(0,100) +
+  labs(title="Percent composition of BISG predicted race by MPV recorded race", 
+       x="BISG plurality estimated race", 
+       y="Percent",
+       caption=paste0("Note: x-axis notes the victim's recorded race as per the Mapping Police Violence data. 
+       The bars reflect the aggregated weighted probabilities of BISG estimates.
+       Data downloaded: 10/24/2022. N = ", sum(total_num) ), fill="MPV race" ) +
+  geom_text(position = position_dodge(width = .9),    # move to center of bars
+              vjust = -0.5,    # nudge above top of bar
+              size = 2) 
+overall_precision_plot
+
+
+```
+
 ## Breaking the results down by police withholding name 
 
 Looking at the data, we see that the imputations are mostly accurate, but not perfect. Notably, there is an underestimate for the number of African American victims. Therefore, one basic check is the level by which these results arose. Overall, we see that most of the times that names were withheld -- at 179 cases -- were when the race of the victim was also unknown. There is suggestive evidence that withholding the surname for victims of Hispanic descent does greatly reduce the accuracy of BISG. While few in number, the cases where the police withheld an African American victim's name appears to exhibit greater accuracy. However, the data are too few. 
@@ -523,8 +567,6 @@ The results demonstrate the segregation score reaches statistical significance (
 ## change the pred_ names in order to get the plural estimates easily 
 police_df_slim_final <- readRDS("data/police_df_slim_final_w_county_acs.rds")
 
-### use the herfindahl fxn to get plural race 
-police_df_slim_final <- race_herfindahl_scores2(police_df_slim_final)
 
 ### make the names match 
 police_df_slim_final$race_simp <- "white"
@@ -593,41 +635,139 @@ segreg_ggplot_reg <- ggplot(pred_prob_df, aes(x=segregation, y=median_est)) +
 segreg_ggplot_reg
 
 ```
-## Precision 
+## Identifying the locations of police violence 
 
-```{r precision}
-
-### collapse the data 
-police_df_slim_final_col <- police_df_slim_final %>%
-  group_by(plural_race,race_simp) %>%
-  tally()
-### get total 
-total_num <- sum(police_df_slim_final_col$n)
-## get pcts; mutate
-police_df_slim_final_col <- police_df_slim_final_col %>%
-  group_by(plural_race) %>%
-  group_by(plural_sum=sum(n))
-police_df_slim_final_col$pct <- round((police_df_slim_final_col$n/police_df_slim_final_col$plural_sum)*100,1)
+Of especial interest is figuring out who is responsible for these killings. Within the data, we see a very skewed distribution. Where most police agencies do not kill anyone -- and are not within the data set -- the median police agency killed one individual. Even the 95th percentile sees only 7 killings. The top 1 percent killed over 25, with the top 5 killing over 75 each. We therefore plot these results below in a density plot, with the text of agencies responsible for killing over 30 presented. For the text, the height is jittered so that the names do not overlap. We can therefore see these agencies driving many of the deaths we see in the plot agencies such as the Los Angeles, CA, Pheonix, AZ, Chicago, IL and Houston, TX police departments drive disproportionate number of deaths. The top one percent drives 20 percent of all killings within the data set. 
 
 
+```{r agencies responsible}
+### create var to sum 
+police_df_slim_final$dum = 1
 
-### let's create a ggplot 
-overall_precision_plot <- ggplot(police_df_slim_final_col, aes(fill=race_simp, y=pct, x=plural_race, label = (pct))) + 
-    geom_bar(position="dodge", stat="identity") + theme_minimal() +ylim(0,100) +
-  labs(title="Percent composition of BISG predicted race by MPV recorded race", 
-       x="BISG plurality estimated race", 
-       y="Percent",
-       caption=paste0("Note: x-axis notes the victim's recorded race as per the Mapping Police Violence data. 
-       The bars reflect the aggregated weighted probabilities of BISG estimates.
-       Data downloaded: 10/24/2022. N = ", sum(total_num) ), fill="MPV race" ) +
-  geom_text(position = position_dodge(width = .9),    # move to center of bars
-              vjust = -0.5,    # nudge above top of bar
-              size = 2) 
-overall_precision_plot
+num_agencies <- police_df_slim_final %>%
+  group_by(Agency.responsible.for.death,state_po) %>%
+  summarise(total_deaths = sum(dum), total_pop=median(total_pop,na.rm=T),
+            duncan_index=median(duncan_index,na.rm=T))
+### get deaths per million 
+num_agencies$deaths_per_mil <- (num_agencies$total_deaths/num_agencies$total_pop)*1000000
 
+
+summary(num_agencies$total_deaths) ## ok, one is really bad
+quantile(num_agencies$total_deaths, seq(0,1,by=0.05)) # hige jump at 5 percent 
+quantile(num_agencies$total_deaths, seq(0.95,1,by=0.01)) # hige jump at 5 percent 
+
+top1percent <- num_agencies %>%
+  dplyr::filter(total_deaths >25)
+sum(top1percent$total_deaths)/nrow(police_df_slim_final)  
+
+
+### what about the county weighted per million numbers? 
+quantile(num_agencies$deaths_per_mil, seq(0,1,by=0.05)) # hige jump at 5 percent 
+### 81 appears the 95th pctile 
+quantile(num_agencies$deaths_per_mil, seq(0.95,1,by=0.001))
+### want to control for culture 
+num_agencies$y_pos = 0.3 + runif(nrow(num_agencies), min=0.1,max=1.1)
+### create a plot for the num og agencies, distribution 
+num_agencies$n10 = num_agencies$total_deaths
+update_geom_defaults("text", list(size = 24))
+agency_kill_dist <- ggplot(data=num_agencies, aes(x=total_deaths, fill="Police killings",col="Police killings")) +
+  geom_density() +  theme_minimal() + theme(legend.position="none") +
+  geom_text(data=subset(num_agencies,total_deaths>25), aes(y=y_pos, x=total_deaths,
+                                                label=stringr::str_wrap(Agency.responsible.for.death,30), size=n10,
+                                                col=as.factor(state_po))) +
+  xlim(0,200) + labs(title="Distribution police killings by police department",y="Density",
+                     x="Number of killings by police",
+                     caption="Text entries are the top 1% of agencies responsible for killings. Weighted as 
+                     the square root of killings. Colors assigned by state of agency.")+
+  theme(axis.text=element_text(size=12),
+        title=element_text(size=12,face="bold"),legend.text = element_text(size=10)) +
+  scale_size(
+    breaks = c(10, 50, 100, 150),
+    range = c(2, 6)
+  ) 
+agency_kill_dist
 
 ```
+However, it is also the case that most of the above police departments serve major metropolitan areas. The greater number of people means a likely lower rate of those killed by police across the population. Therefore, it is also possible to divide the number of killings by the population served. We will use the county as a denominator, since we do not have the data right now to map out the entire jurisdiction. Running the results by killings per million reveals a different pattern. Now, a new set of agencies kill disproportionately more relative to the people they serve. The top 1 percent kill approximately 200 per million. The top 5 agencies within the data are the Kentucky State Police, Nye County Sheriff's Office and Esmeralda County Sheriff's Office in Nevada, Foard County Sheriff's Office of Texas, Kiowa County Sheriff's Office of Colorado, and finally the New Mexico State Police. It should be noted that all but the Kentucky and New Mexico police above killed one person, though these happen to be sparsely populated counties.  
 
+```{r weighted killings }
+
+#### now, let's get the results by the per million; scatter plot 
+agency_kill_dist_per_million <- ggplot(data=num_agencies, aes(x=total_deaths,y=deaths_per_mil, fill="Police killings",col="Police killings")) +
+  geom_point(alpha=0.4) + 
+  theme_minimal() + theme(legend.position="none") +
+  geom_text(data=subset(num_agencies, deaths_per_mil > 487) ,aes(label=stringr::str_wrap(paste0(Agency.responsible.for.death, sep=", ", state_po),20), x=total_deaths + 10,
+                                                col=as.factor(state_po)),alpha=0.7,size=3) +
+  xlim(0,150) + labs(title="Distribution police killings by police department",y="killings per million in county",
+                     x="Number of killings by police",
+                     caption="Text entries are the top 10 agencies responsible for killings per million. \n Jurisdiction matching areas not possible for now, so defaulted to county's 2016-2020 5-year ACS total population.\n Colors assigned by state of agency.")+
+  theme(axis.text=element_text(size=12),
+        title=element_text(size=12,face="bold"),legend.text = element_text(size=10)) +
+  scale_size(
+    breaks = c(10, 50, 100, 150),
+    range = c(2, 6)
+  ) + ylim(0,2000)
+agency_kill_dist_per_million
+```
+
+## Characteristics by segregation and demographics 
+
+We finally take a look at the county characteristics where police killed the victims. Of special interest are how segregated and White a county is. A common reason given for pulling individuals over is that they seem to be "out of place," i.e., the race of the victim does not match that of the area. When plotting the results, we see that police killed their victims in a county with a median White percent of approximately 57 percent. Additionally, the median segregation score is approximately 0.35, suggesting that 35 percent of the population would need to move in order to make each block group a microcosm of the county's racial demographics. 
+
+When plotting the results by race of victim, we see no strong relationship. When plotting the loess curve, there is suggestive evidence that police tend to kill victims in more white and less segregated counties. However, the results are fairly weak. 
+
+```{r demographics scatterplot}
+police_df_slim_final <- readRDS("data/police_df_slim_final_w_county_acs.rds")
+
+### use the herfindahl fxn to get plural race 
+police_df_slim_final <- race_herfindahl_scores2(police_df_slim_final)
+
+### make the names match 
+police_df_slim_final$race_simp <- "white"
+police_df_slim_final$race_simp[police_df_slim_final$Victim.s.race=="Black"] <- "black"
+police_df_slim_final$race_simp[police_df_slim_final$Victim.s.race=="Asian"] <- "asian"
+police_df_slim_final$race_simp[police_df_slim_final$Victim.s.race=="Pacific Islander"] <- "asian"
+police_df_slim_final$race_simp[police_df_slim_final$Victim.s.race=="Hispanic"] <- "hispanic"
+police_df_slim_final$race_simp[police_df_slim_final$Victim.s.race=="Native American"] <- "other"
+police_df_slim_final$race_simp[police_df_slim_final$Victim.s.race=="Unknown race"] <- "unknown"
+
+### create final category, this time with imputed race 
+police_df_slim_final$final_race <- police_df_slim_final$race_simp
+police_df_slim_final$final_race[police_df_slim_final$race_simp=="unknown"] <- 
+  police_df_slim_final$plural_race[police_df_slim_final$race_simp=="unknown"]
+
+### check out dist of white pct 
+quantile(police_df_slim_final$white_pct, seq(0,1,by=0.05))
+quantile(police_df_slim_final$duncan_index, seq(0,1,by=0.05),na.rm=T)
+
+#### now, plot the results 
+scatter_plot_demos <- ggplot(data=police_df_slim_final, aes(x=white_pct, y=duncan_index, color=final_race)) +
+  geom_point(alpha=0.5) + theme_minimal() + geom_smooth() +
+  labs(title="County characteristics for locations for victims of police violence",y="Segregation",
+                     x="Percent of County White", color="Race",
+                     caption="Data from county level ACS data, 2016-2020.\n Segregation measured via the Duncan-Duncan index, with scores near 0 reflecting no segregation,\n and scores at 1 complete segregation. \n Races that were previously noted as unkown coded with the plurality estimate from BISG.")
+
+scatter_plot_demos
+```
+However, if we plot the results by gini index, we see a stronger relationship. Across all racial categories, there tends to be more killings in Whiter and more economically equal counties. These relationships are worth exploring for the necessary context in understanding the environment that can lead to police violence. 
+
+
+```{r gini scatterplot}
+
+
+### check out dist of white pct 
+quantile(police_df_slim_final$gini_index, seq(0,1,by=0.05),na.rm=T)
+quantile(county_acs_slim$gini_index, seq(0,1,by=0.05),na.rm=T)
+
+#### now, plot the results 
+scatter_plot_gini <- ggplot(data=police_df_slim_final, aes(x=white_pct, y=gini_index, color=final_race)) +
+  geom_point(alpha=0.5) + theme_minimal() + geom_smooth() +
+  labs(title="County characteristics for locations for victims of police violence",y="Gini",
+                     x="Percent of County White", color="Race",
+                     caption="Data from county level ACS data, 2016-2020.\n Gini index such that scores near 0 reflect complete economic equality,\n and scores at 1 complete inequality. \n Races that were previously noted as unkown coded with the plurality estimate from BISG.")
+
+scatter_plot_gini
+```
 # Appendix 
 
 
