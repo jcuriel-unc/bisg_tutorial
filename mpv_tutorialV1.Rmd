@@ -160,6 +160,8 @@ police$full_name <- trimws(police$full_name)
 ### print out long names; glance over if any obvious mistakes 
 #long_names <- subset(police, name_length > 3)
 #sort(unique(long_names$full_name)) 
+## create ID 
+police$mpv_id2 <- seq.int(1,nrow(police),by=1)
 
 ```
 
@@ -189,22 +191,236 @@ head(police$last_name)
 
 ## The Geographic component 
 
-When employing BISG, we want the geographic information to be preferably at the level of Census Block Group, which is the most precise data that is also updated via 5-year American Community Survey (ACS). In the event that we do not have geocoding, we can rely upon ZIP codes. Where ZIP codes are not an option, finally county. 
+When employing BISG, we want the geographic information to be preferably at the level of Census Block Group, which is the most precise data that is also updated via 5-year American Community Survey (ACS). In the event that we do not have geocoding, we can rely upon ZIP codes. Where ZIP codes are not an option, finally name alone.^[County data could be used, though for the purpose of this exercise, we see enough of a reduction in missing data that it is inefficient for the purposes of this tutorial, especially since the command is the same as it is for the ZIP code imputation. ] For this step we are going to make use of the MPV data already overlaid onto Census Block Groups via coordinates for all but 74 observations. The process to do so can be found in the appendix. The processes are cut here for time. 
 
-```{r pressure, echo=FALSE}
-sum(is.na(police$Victim.s.race))
-unique(police$Victim.s.race)
-length(which(police$Victim.s.race=="Unknown race")) # around 10 % 
+The mpv data -- now titled police_sf -- and an sf object, gets read in. We next read in the cbfs_acs data, which has the 2016-2020 5 year ACS data. Importantly, it has the r_eth fields, which are the proportion of a state's population by race that lives within a Census Block Group. By state, each column sums to 1. Once we get the fields with the FIPS code to match (length of 12, zero-padded on the left), it is possible to conduct the primary BISG command. We employ predict_race_any() from the zipWRUext package. The arguments of interest are 1) the dataframe on which we apply BISG, 2) the ACS data with the racial information mentioned above, and 3) a vector of the column names that will be necessary to match/merge by geographic level.  Upon completion, we get the predicted probabilities for race by observation. 
 
-## check for officer's name and then race 
-sum(is.na(police$Names.of.Officers.Involved..DRAFT.))
-#sort(unique(police$Names.of.Officers.Involved..DRAFT.)) # something like 1800 officers 
-#table(police$Race.of.Officers.Involved..DRAFT.)
-### take one of the rows 
+However, we next see that there are some observations that have missing values. These likely arose because the block groups contained no residents. Therefore, we next sequentially split off and subset data frames and proceed to run the predict_any command again, this time by ZIP code. Upon completing the ZIP code predictions, we see that there are still a dozen or so observations without predictions, so we finally conduct BISG using the base wru command, predict_race, employing only surname. 
 
-off_names <- strsplit(police$Names.of.Officers.Involved..DRAFT.[26], ",") 
-off_names <- unlist(off_names) # worked 
-str(off_names)
+```{r geographic component, echo=FALSE}
+
+### read in the police sf data 
+police_sf <- readRDS("data/police_sf.rds")
+
+## now read in the 5-year ACS data 
+cbfs_acs <- read.csv("data/acs2019bisgframe.csv")
+head(cbfs_acs)
+summary(nchar(cbfs_acs$Geo_FIPS))
+### not all FIP codes are length 12; 0-pad 
+cbfs_acs$Geo_FIPS <- str_pad(cbfs_acs$Geo_FIPS, width=12,side="left",pad="0")
+
+
+##### Prepping the column names to match for the predict_any merge #####
+### now, get the names to be the same as the ACS data 
+colnames(police_sf)[colnames(police_sf)=="cbg_fips"] <- "Geo_FIPS"
+colnames(police_sf)[colnames(police_sf)=="last_name"] <- "surname"
+## predict_race_any uses data frames, not sf; therefore, extract 
+police_df <- as.data.frame(police_sf)
+
+
+##### Running BISG via the predict_any cmd (zipWRUext & wru) #####
+### now, we should be able to run predict_any
+police_df <- predict_race_any(police_df, cbfs_acs, c("Geo_FIPS")) # arguments: df to be imputed on, the df with the demographic data necessary for the BISG process (r_whi,r_bla,r_his,r_asi,r_oth) ; the fields common in both dfs to do the merge
+
+
+##### Cleaning up the missing data ##### 
+### check to ensure no data missing
+sum(is.na(police_df$pred_whi)) ## 24 missing; will want to use ZIP code to predict next 
+
+### subset 
+police_df_miss <- subset(police_df, is.na(pred_whi)==T)
+police_df <- subset(police_df, is.na(pred_whi)==F)
+
+### drop the empty fields 
+police_df_miss <- subset(police_df_miss, select=-c(pred_whi,pred_bla,pred_his,pred_asi,pred_oth))
+
+### read in the zip code data 
+zcta_acs <- readRDS("data/zcta_acs2016_2020.rds")
+colnames(police_df_miss)[colnames(police_df_miss)=="Zipcode"] <- "zcta5"
+police_df_miss <- predict_race_any(police_df_miss,zcta_acs,c("zcta5") )
+### no failed merges; check data 
+sum(is.na(police_df_miss$pred_whi)) # 1 missing observation 
+
+#### read in the other missing data 
+police_coord_missing <-readRDS("data/police_coord_missing.rds")
+
+### run zip code bisg 
+colnames(police_coord_missing)[colnames(police_coord_missing)=="Zipcode"] <- "zcta5"
+colnames(police_coord_missing)[colnames(police_coord_missing)=="last_name"] <- "surname"
+police_coord_missing <- predict_race_any(police_coord_missing,zcta_acs,c("zcta5") )
+### check missing race data 
+sum(is.na(police_coord_missing$pred_whi)) # 13 
+
+##### Getting the dataframes to match in columns #####
+
+### let's create a slimmed version of these data sets so that we can later bind these with fewer problems 
+police_df_slim <- subset(police_df, select=c(Geo_FIPS,full_name,Victim.s.age,Victim.s.gender,
+                                             Victim.s.race,Date.of.Incident..month.day.year.,
+                                             Street.Address.of.Incident,City,State,Zipcode,County,
+                                             Agency.responsible.for.death,Cause.of.death,alleged_weapon,
+                                             name_withheld,mpv_id2,surname,geometry,pred_whi,pred_bla,
+                                             pred_his,pred_asi,pred_oth))
+colnames(police_df_slim)[colnames(police_df_slim)=="Zipcode"] <- "zcta5"
+
+### missing dfs 
+police_df_miss <- subset(police_df_miss, select=c(Geo_FIPS,full_name,Victim.s.age,Victim.s.gender,
+                                             Victim.s.race,Date.of.Incident..month.day.year.,
+                                             Street.Address.of.Incident,City,State,zcta5,County,
+                                             Agency.responsible.for.death,Cause.of.death,alleged_weapon,
+                                             name_withheld,mpv_id2,surname,geometry,pred_whi,pred_bla,
+                                             pred_his,pred_asi,pred_oth) )
+### now the missing coord data
+police_coord_missing$Geo_FIPS = NA
+police_coord_missing$geometry = NA
+police_coord_missing <- subset(police_coord_missing, select=c(Geo_FIPS,full_name,Victim.s.age,Victim.s.gender,
+                                             Victim.s.race,Date.of.Incident..month.day.year.,
+                                             Street.Address.of.Incident,City,State,zcta5,County,
+                                             Agency.responsible.for.death,Cause.of.death,alleged_weapon,
+                                             name_withheld,mpv_id2,surname,geometry,pred_whi,pred_bla,
+                                             pred_his,pred_asi,pred_oth) )
+### create a categorical var for level of geography used for each 
+
+### now, subset the data to the remaining with
+police_df_slim$impute_level = "cbg"
+police_df_miss$impute_level = "zcta"
+police_coord_missing$impute_level = "zcta"
+### now assign missing vals 
+police_df_miss$impute_level[is.na(police_df_miss$pred_whi)==T] <- "surname"
+police_coord_missing$impute_level[is.na(police_coord_missing$pred_whi)==T] <- "surname"
+### now, subset the missing data 
+police_df_miss_surname <- subset(police_df_miss, is.na(pred_whi)==T)
+police_coord_missing_surname <- subset(police_coord_missing, is.na(pred_whi)==T)
+### now remove the missing data from the prior sets 
+police_df_miss <- subset(police_df_miss, is.na(pred_whi)==F)
+police_coord_missing <- subset(police_coord_missing, is.na(pred_whi)==F)
+
+### run the wru command for surname alone 
+police_df_miss_surname <- predict_race(police_df_miss_surname, surname.only = T)
+police_coord_missing_surname <- predict_race(police_coord_missing_surname, surname.only = T)
+
+### bind the data 
+police_df_miss_surname <- rbind(police_df_miss_surname,police_coord_missing_surname )
+
+### now, fix teh column names 
+police_df_miss_surname <- subset(police_df_miss_surname, 
+                                 select=-c(pred_whi,pred_bla,pred_his,pred_asi,pred_oth))
+## change the names from wru alone 
+colnames(police_df_miss_surname)[grepl("pred.", colnames(police_df_miss_surname))] <-
+  str_replace_all(colnames(police_df_miss_surname)[grepl("pred.", colnames(police_df_miss_surname))], "pred.", "pred_")
+### now combine all of the data 
+police_df_slim_final <- rbind(police_df_slim,police_df_miss,police_coord_missing,police_df_miss_surname )
+
+#### good, now save 
+saveRDS(police_df_slim_final, "data/police_df_slim_final.rds")
 
 ```
 
+
+
+
+# Appendix 
+
+## Spatial operations for overlaying Census Block Groups onto the MPV data
+
+```{r spatial operations appendix}
+### check the coordinates present 
+(sum(is.na(police$Longitude))/nrow(police))*100 # most actually present; good 0.744317 ; 
+(sum(is.na(police$Latitude))/nrow(police))*100 # most actually present; good
+
+### make the police df into an sf frame 
+## first, remove the missing data; save for later 
+police_coord_missing <- subset(police, is.na(Longitude)==T)
+saveRDS(police_coord_missing, "data/police_coord_missing.rds")
+## second, remove missing data 
+police <- subset(police, is.na(Longitude)==F )
+
+### read in the cbg file 
+#cbgs <- st_read("data/cbgs/CB2010.shp")
+#cbgs <- subset(cbgs, FIPS!="020160001001")
+cbgs <- readRDS("data/cbgs2010sf.rds")
+## convert 
+police_sf <- st_as_sf(police, coords= c("Longitude","Latitude"), 
+                      crs=st_crs(cbgs)) # long = x, lat = y
+
+## try to make valid 
+police_sf <- st_make_valid(police_sf)
+#cbgs <- st_make_valid(cbgs)
+### save the cbg data here 
+#saveRDS(cbgs,"data/cbgs2010sf.rds")
+
+### see what happens with this 
+test_obj <- st_intersects(police_sf,cbgs)$FIPS
+test_obj <- sapply(st_intersects(police_sf,cbgs), function(z) if (length(z)==0) NA_integer_ else z[1])
+### what this produces is an integer of 9868, which suggests that it did match onto the CBG file; now we need 
+# to ensure that the data 
+police_sf$inter_cbg <- test_obj 
+police_sf$cbg_fips <- cbgs$FIPS[test_obj]
+
+### save the police sf data 
+saveRDS(police_sf,"data/police_sf.rds")
+
+
+
+```
+
+## Identifying Race of Police responsible for violence 
+
+The following is code that I created as a means to identify police officers responsible for killing the victims within the data set. Note, the data are very unclean and do not follow best formatting in regards to tracking police violence. The main problem consists in how the data are entered within the "Names.of.Officers.Involved..DRAFT." field. 
+
+```{r pilot police name cleaning}
+## because officers sometimes separated by "and" be sure to replace 
+police$Names.of.Officers.Involved..DRAFT. <- str_replace_all(police$Names.of.Officers.Involved..DRAFT.,
+                                                             "and", ",")
+police$Names.of.Officers.Involved..DRAFT. <- str_replace_all(police$Names.of.Officers.Involved..DRAFT.,
+                                                             ":", ",")
+police$Names.of.Officers.Involved..DRAFT. <- str_replace_all(police$Names.of.Officers.Involved..DRAFT.,
+                                                             "/+", ",")
+police$Names.of.Officers.Involved..DRAFT. <- str_replace_all(police$Names.of.Officers.Involved..DRAFT.,
+                                                             ";", ",")
+
+officer_df <- data.frame()
+for (i in 1:nrow(police)) {
+  print(i)
+  ## grab the list of names if present 
+  off_names <- strsplit(police$Names.of.Officers.Involved..DRAFT.[i], ",") 
+  off_names <- unlist(off_names)
+  ### officer race here 
+  off_race <- strsplit(police$Race.of.Officers.Involved..DRAFT.[i], ",")
+  off_race <- unlist(off_race)
+  ## grab the list of races if present 
+  if(identical(off_names, character(0))==T) {
+    print("skipping")
+  }else{
+    new_df <- as.data.frame(cbind(officer_name=off_names, county=police$County[i], 
+                                  agency=police$Agency.responsible.for.death[i],mpv_id2=police$mpv_id2[i]))
+    if(length(off_race)==0){
+      new_df$officer_race <- NA
+    }else if(length(off_race) > 0 & length(off_race) <= length(off_names) ){
+      new_df$officer_race <- NA
+      new_df$officer_race[1:length(off_race)] <- off_race
+    }else if(length(off_race) > 0 & length(off_race) > length(off_names)){
+      new_df$officer_race <- NA
+      new_df$officer_race[1:length(off_names)] <- off_race[1:length(off_names)]
+    }
+    if(nrow(new_df)>0 & nrow(officer_df)==0){
+      officer_df <- new_df
+      
+    }else if(nrow(new_df)>0 & nrow(officer_df)>0){
+      officer_df <- rbind(officer_df, new_df)
+    }
+    if(exists("new_df")==T){
+      rm(new_df)
+    }
+  }
+
+}
+
+officer_df$officer_name2 <- gsub("\\s*\\([^\\)]+\\)","",as.character(officer_df$officer_name))  
+### looks like some of these oddities are cuased by non-clean data for names; let's check for those below a 
+# certain character length 
+officer_df$name_length <- nchar(officer_df$officer_name2)
+## find length under 3 
+length(which(officer_df$name_length<4)) # only 102 
+summary(officer_df$name_length)
+
+```

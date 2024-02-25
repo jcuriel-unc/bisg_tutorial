@@ -1,0 +1,634 @@
+---
+title: "BISG Mapping Police Violence"
+author: "John A. Curiel"
+date: "2024-02-22"
+output: html_document
+---
+# Mapping Police Violence outline 
+
+The goal of this module is to learn how to implement Bayesian Improved Surname Geocoding (BISG) imputation of race, in addition to validation exercises. We shall impute race employing Mapping Police Violence data, which in part records race and location.^[https://mappingpoliceviolence.org/] With these data, we shall cover the general best practices and learn the general error rate. 
+
+## Checking and installing relevant packages
+
+The first step when employing BISG is to install the relevant packages. For BISG, we specifically want the "wru" package ("Who are you?") by Imai and Khanna (2016) in addition to zipWRUext2 by Clark, Curiel and Steelman (2021) for ease of use. Note, because zipWRUext2 relies in part upon the surname dictionary provided by Imai and Khanna's version 0.1-12, the "special install" section in the block of code below shall ensure that the appropriate version is installed, thereby preventing issues with imputation later on. 
+
+```{r setup, include=TRUE, results='hide',message=FALSE,warning=FALSE}
+### check for packages 
+pkg <- c("stringr","stringi","tidyverse","foreign","conflicted","data.table","raster","gtools","rgdal",
+         "ggplot2","ggpubr","rstudioapi","rgeos","scales","splitstackshape",
+         "tidyr","devtools", "sf", "geojsonio","lme4","arm","MASS")
+
+for (i in pkg){
+  print(i)
+  if(require(i, character.only=TRUE)){
+    print(paste(i, "is loaded correctly"))
+  } else{
+    print(paste("trying to install", i))
+    install.packages(i)
+    if(require(i, character.only=TRUE)){
+      print(paste(i, "installed and loaded"))
+    } else{
+      stop(paste("could not install", i))
+    }
+  }
+}
+###special install for wru 
+
+check_wru <- system.file("wru")
+
+require(devtools)
+if(require("wru", character.only=TRUE) & as.numeric(substr(packageVersion("wru"),1,3)) < 1 ){
+  print(paste("WRU", "is loaded correctly"))
+} else{
+  print(paste("trying to install wru"))
+  if(check_wru!=""){
+    detach("package:wru", unload=TRUE)
+    print("Detached another installed version of wru")
+  }
+  install_version("wru", version = "0.1-12", repos = "http://cran.us.r-project.org")
+  ### note: if asked to update other versions, just press 3 to skip
+  if(require(i, character.only=TRUE)){
+    print(paste("wru installed and loaded"))
+  } else{
+    stop(paste("could not install wru"))
+  }
+  
+}
+
+####pkgs to be used 
+library(foreign)
+library(tidyverse)
+library(dplyr)
+library(raster) # raster (pixel) object handling
+library(rgdal) # shapefile access
+library(rgeos) # geometry operations
+library(stringi) # text processing 
+library(stringr) # text processing 
+library(splitstackshape)
+library(data.table)
+library(ggplot2)
+library(scales)
+library(conflicted)
+library(geojsonio)
+library(sf) # simple features for spatial objects 
+library(lme4)
+library(arm)
+library(MASS)
+##install the arealOverlap pkg 
+#devtools::install_github("https://github.com/jcuriel-unc/arealOverlap2",subdir="arealOverlap")
+#library(arealOverlap)
+library(wru)
+##install the zipWRUext2 pkg 
+#devtools::install_github("https://github.com/jcuriel-unc/zipWRUext",subdir="zipWRUext2")
+library(zipWRUext2)
+
+## set directory 
+data_wd <- dirname(rstudioapi::getActiveDocumentContext()$path)
+setwd(data_wd)
+substrRight <- function(x, n){
+  substr(x, nchar(x)-n+1, nchar(x))
+}
+### revision of herfindahl fxn from zipWRUext
+race_herfindahl_scores2 <- function (dataframe1) 
+{
+  if (any(colnames(dataframe1) == "pred_whi") == FALSE) {
+    stop("Predicted race variable not present.")
+  }
+  predNames <- c("pred_whi", "pred_bla", "pred_his", 
+                 "pred_asi", "pred_oth")
+  dataframe1 <- as.data.frame(dataframe1)
+  dataframe1$herf_weight <- (dataframe1$pred_whi)^2 + (dataframe1$pred_bla)^2 + 
+    (dataframe1$pred_his)^2 + (dataframe1$pred_asi)^2 + (dataframe1$pred_oth)^2
+  dataframe_sub <- subset(dataframe1, select = c(pred_whi, 
+                                                 pred_bla, pred_his, pred_asi, pred_oth))
+  prob_matrix <- as.matrix(dataframe_sub)
+  prob_matrix2 <- apply(prob_matrix, 1, max)
+  dataframe1 <- cbind(dataframe1, prob_matrix2)
+  colnames(dataframe1)[colnames(dataframe1) == "prob_matrix2"] <- "max_race_prob"
+  dataframe1$plural_race[dataframe1$pred_whi == dataframe1$max_race_prob] <- "white"
+  dataframe1$plural_race[dataframe1$pred_bla == dataframe1$max_race_prob] <- "black"
+  dataframe1$plural_race[dataframe1$pred_his == dataframe1$max_race_prob] <- "hispanic"
+  dataframe1$plural_race[dataframe1$pred_asi == dataframe1$max_race_prob] <- "asian"
+  dataframe1$plural_race[dataframe1$pred_oth == dataframe1$max_race_prob] <- "other"
+  return(dataframe1)
+}
+
+```
+
+## Loading in the proper data
+
+The next step is to read in and clean the data. These data were downloaded from the Mapping Police Violence site on October 24, 2022 by Logan Harrah as part of his Senior Capstone Project presented at the Western Political Science Conference on April 7, 2023 titled "I'm Armed, Don't Shoot!" 
+
+We first start by reading in the data "mpv_data.csv" and proceed to clean two fields of interest. First, we clean the field noting the "weapon" reportedly on the person of interest. This, we change to "alleged_weapon."  
+
+
+```{r data of interest}
+### read in the data 
+police <- read.csv("data/mpv_df.csv")
+## change name for weapon field 
+colnames(police)[colnames(police)=="Alleged.Weapon..Source..WaPo.and.Review.of.Cases.Not.Included.in.WaPo.Database."] <-
+  "alleged_weapon"
+## change weapon field to lower case 
+police$alleged_weapon <- str_to_lower(police$alleged_weapon)
+```
+
+Next, we proceed to clean the name field, which we will need for the "Surname" portion of BISG. Note, we find that there are 226 names withheld. Further, it appears that the name fields were not properly cleaned. Additionally, the police withheld a number of names. We will need to ensure proper cleaned names for the purpose of the surname aspect of BISG.  
+
+```{r checking name fields, results='asis',include=TRUE}
+
+knitr::kable(head(police[,1:5], 10))
+
+```
+
+Therefore, we will clean the names in three stages. First, we shall first note in a dummy field titled "name_withheld" whether a name is absent, coded 1 if true, 0 otherwise. We then shall replace the name with the generic "Noah A Smith", which according to multiple surname and first name dictionaries approximately matches the naive prior employed across multiple BISG associated packages. Such information will be useful later once we seek to identify error rates. Thankfully, it appears that the police withheld only 226 names out of 9,942 observations. 
+
+
+```{r name checking, include=TRUE,results='asis'}
+### we will want a cleaner version to split of full_name 
+police$full_name <- police$Victim.s.Full.name
+
+### note: some names are withheld by police 
+print(length(which(police$full_name=="Name withheld by police"))) ### note: 226 names withheld
+
+# we will now want to create a dummy variable for later, since these will be information where we rely primarily on the geographic component. 
+police$name_withheld <- 0
+police$name_withheld[police$full_name=="Name withheld by police"] <- 1
+sum(police$name_withheld)
+
+### We will now proceed to choose a name that acts as a naive prior, "Smith". Note, the "Noah A" portion was likewise found to have a naive distribution as validated against the python library, zrp -- Zestai Race Predictor.  
+police$full_name[police$full_name=="Name withheld by police"] <- "Noah A Smith"
+#table(police$full_name)
+length(unique(police$full_name)) # 9662
+```
+
+We will next need to clean and split the full name into multiple fields. We will want to be careful, as we only need the surname for today, though it is possible to use first and middle names as well with more advanced packages. Additionally, we saw earlier names such as "Flowers II." Where the suffix is not helpful in imputing race, splitting names might result in losing the surname and only grabbing the suffix. Therefore, we will likewise need to clean the suffix characters out of the full name prior to splitting. The first step is to remove punctuation, for the purpose of ease of cleaning. Next, proceed to replace the suffixes. Next, find the length of the name field, followed by the removal of white space. Commented out is a command to print out a subset of data with names longer than 3 sections. When glancing over the data, there appears to be no indication of any suffix that might thwart the BISG process.  
+
+```{r suffix cleaning, include=TRUE,results='asis'}
+#### splitting names and pre-cleaning #####
+
+### get rid of punctuation 
+police$full_name <- gsub("[[:punct:]]", " ", police$full_name ) 
+
+## get rid of various suffixes 
+police$full_name <- str_replace_all(police$full_name, " IV", "")
+police$full_name <- str_replace_all(police$full_name, " III", "")
+police$full_name <- str_replace_all(police$full_name, " II", "")
+police$full_name <- str_replace_all(police$full_name, " Jr", "")
+police$full_name <- str_replace_all(police$full_name, " Sr", "")
+
+## create a length field for name; we want to look at those more than 3. 
+police$name_length <- lengths(gregexpr("[A-z]\\W+", police$full_name)) + 1L
+
+## remove extra white spaces 
+police$full_name <- gsub("\\s+"," ",police$full_name)
+police$full_name <- trimws(police$full_name)
+
+### print out long names; glance over if any obvious mistakes 
+#long_names <- subset(police, name_length > 3)
+#sort(unique(long_names$full_name)) 
+## create ID 
+police$mpv_id2 <- seq.int(1,nrow(police),by=1)
+
+```
+
+With the suffix values cleaned out, it is now possible to split the names into individual fields. The commands shall string split the data into list objects, grabbing the first value for the first name, last for the last name, and the second from the last for the middle name. Note, the middle name might grab the first name where the length is less than 3. Therefore, these are coded as "A" where length is equal to 2. Note, there are some names far longer. We will not account for this for now, since even with BISG that employs all parts of the name, little predictive value is gained from middle names.  
+
+
+```{r splitting names,include=TRUE,results='asis'}
+### now work on splitting names 
+police$first_name <- sapply(strsplit(police$full_name, " "), `[`, 1) # for first name, we are grabbing the portion that is first before the space split. 
+# we can likewise see this by going with the "Noah A Smith" example 
+sapply(strsplit("Noah A Smith", " "), `[`, 1) #see, pulled Noah as the first name as the first element of a list. 
+
+police$last_name <- sub(".* ", "", police$full_name) # for last name, we are pulling the last portion of the full name 
+sub(".* ", "", "Noah A Smith") ## we will see what it does to name here; note, the name "Smith" is grabbed. 
+## now, let's check what happens if no middle name? 
+sub(".* ", "", "Noah Smith") # still Smith. Therefore, all should be good to go for the surname of interest. 
+
+#police$name_length <- lengths(gregexpr("[A-z]\\W+", police$full_name)) + 1L
+summary(police$name_length) #looks like most do not have middle names ; 
+### assign middle name of "A" based on if 2 length
+police$middle_name <- sapply( strsplit(police$full_name, " "), tail, 1)
+police$middle_name[police$name_length==2] <- "A"
+
+head(police$last_name)
+
+```
+
+## The Geographic component 
+
+When employing BISG, we want the geographic information to be preferably at the level of Census Block Group, which is the most precise data that is also updated via 5-year American Community Survey (ACS). In the event that we do not have geocoding, we can rely upon ZIP codes. Where ZIP codes are not an option, finally name alone.^[County data could be used, though for the purpose of this exercise, we see enough of a reduction in missing data that it is inefficient for the purposes of this tutorial, especially since the command is the same as it is for the ZIP code imputation. ] For this step we are going to make use of the MPV data already overlaid onto Census Block Groups via coordinates for all but 74 observations. The process to do so can be found in the appendix. The processes are cut here for time. 
+
+The mpv data -- now titled police_sf -- and an sf object, gets read in. We next read in the cbfs_acs data, which has the 2016-2020 5 year ACS data. Importantly, it has the r_eth fields, which are the proportion of a state's population by race that lives within a Census Block Group. By state, each column sums to 1. Once we get the fields with the FIPS code to match (length of 12, zero-padded on the left), it is possible to conduct the primary BISG command. We employ predict_race_any() from the zipWRUext package. The arguments of interest are 1) the dataframe on which we apply BISG, 2) the ACS data with the racial information mentioned above, and 3) a vector of the column names that will be necessary to match/merge by geographic level.  Upon completion, we get the predicted probabilities for race by observation. 
+
+However, we next see that there are some observations that have missing values. These likely arose because the block groups contained no residents. Therefore, we next sequentially split off and subset data frames and proceed to run the predict_any command again, this time by ZIP code. Upon completing the ZIP code predictions, we see that there are still a dozen or so observations without predictions, so we finally conduct BISG using the base wru command, predict_race, employing only surname. 
+
+```{r geographic component, echo=FALSE}
+
+### read in the police sf data 
+police_sf <- readRDS("data/police_sf.rds")
+
+## now read in the 5-year ACS data 
+cbfs_acs <- read.csv("data/acs2019bisgframe.csv")
+head(cbfs_acs)
+summary(nchar(cbfs_acs$Geo_FIPS))
+### not all FIP codes are length 12; 0-pad 
+cbfs_acs$Geo_FIPS <- str_pad(cbfs_acs$Geo_FIPS, width=12,side="left",pad="0")
+
+
+##### Prepping the column names to match for the predict_any merge #####
+### now, get the names to be the same as the ACS data 
+colnames(police_sf)[colnames(police_sf)=="cbg_fips"] <- "Geo_FIPS"
+colnames(police_sf)[colnames(police_sf)=="last_name"] <- "surname"
+## predict_race_any uses data frames, not sf; therefore, extract 
+police_df <- as.data.frame(police_sf)
+
+
+##### Running BISG via the predict_any cmd (zipWRUext & wru) #####
+### now, we should be able to run predict_any
+police_df <- predict_race_any(police_df, cbfs_acs, c("Geo_FIPS")) # arguments: df to be imputed on, the df with the demographic data necessary for the BISG process (r_whi,r_bla,r_his,r_asi,r_oth) ; the fields common in both dfs to do the merge
+
+
+##### Cleaning up the missing data ##### 
+### check to ensure no data missing
+sum(is.na(police_df$pred_whi)) ## 24 missing; will want to use ZIP code to predict next 
+
+### subset 
+police_df_miss <- subset(police_df, is.na(pred_whi)==T)
+police_df <- subset(police_df, is.na(pred_whi)==F)
+
+### drop the empty fields 
+police_df_miss <- subset(police_df_miss, select=-c(pred_whi,pred_bla,pred_his,pred_asi,pred_oth))
+
+### read in the zip code data 
+zcta_acs <- readRDS("data/zcta_acs2016_2020.rds")
+colnames(police_df_miss)[colnames(police_df_miss)=="Zipcode"] <- "zcta5"
+police_df_miss <- predict_race_any(police_df_miss,zcta_acs,c("zcta5") )
+### no failed merges; check data 
+sum(is.na(police_df_miss$pred_whi)) # 1 missing observation 
+
+#### read in the other missing data 
+police_coord_missing <-readRDS("data/police_coord_missing.rds")
+
+### run zip code bisg 
+colnames(police_coord_missing)[colnames(police_coord_missing)=="Zipcode"] <- "zcta5"
+colnames(police_coord_missing)[colnames(police_coord_missing)=="last_name"] <- "surname"
+police_coord_missing <- predict_race_any(police_coord_missing,zcta_acs,c("zcta5") )
+### check missing race data 
+sum(is.na(police_coord_missing$pred_whi)) # 13 
+
+##### Getting the dataframes to match in columns #####
+
+### let's create a slimmed version of these data sets so that we can later bind these with fewer problems 
+police_df_slim <- subset(police_df, select=c(Geo_FIPS,full_name,Victim.s.age,Victim.s.gender,
+                                             Victim.s.race,Date.of.Incident..month.day.year.,
+                                             Street.Address.of.Incident,City,State,Zipcode,County,
+                                             Agency.responsible.for.death,Cause.of.death,alleged_weapon,
+                                             name_withheld,mpv_id2,surname,geometry,pred_whi,pred_bla,
+                                             pred_his,pred_asi,pred_oth))
+colnames(police_df_slim)[colnames(police_df_slim)=="Zipcode"] <- "zcta5"
+
+### missing dfs 
+police_df_miss <- subset(police_df_miss, select=c(Geo_FIPS,full_name,Victim.s.age,Victim.s.gender,
+                                             Victim.s.race,Date.of.Incident..month.day.year.,
+                                             Street.Address.of.Incident,City,State,zcta5,County,
+                                             Agency.responsible.for.death,Cause.of.death,alleged_weapon,
+                                             name_withheld,mpv_id2,surname,geometry,pred_whi,pred_bla,
+                                             pred_his,pred_asi,pred_oth) )
+### now the missing coord data
+police_coord_missing$Geo_FIPS = NA
+police_coord_missing$geometry = NA
+police_coord_missing <- subset(police_coord_missing, select=c(Geo_FIPS,full_name,Victim.s.age,Victim.s.gender,
+                                             Victim.s.race,Date.of.Incident..month.day.year.,
+                                             Street.Address.of.Incident,City,State,zcta5,County,
+                                             Agency.responsible.for.death,Cause.of.death,alleged_weapon,
+                                             name_withheld,mpv_id2,surname,geometry,pred_whi,pred_bla,
+                                             pred_his,pred_asi,pred_oth) )
+### create a categorical var for level of geography used for each 
+
+### now, subset the data to the remaining with
+police_df_slim$impute_level = "cbg"
+police_df_miss$impute_level = "zcta"
+police_coord_missing$impute_level = "zcta"
+### now assign missing vals 
+police_df_miss$impute_level[is.na(police_df_miss$pred_whi)==T] <- "surname"
+police_coord_missing$impute_level[is.na(police_coord_missing$pred_whi)==T] <- "surname"
+### now, subset the missing data 
+police_df_miss_surname <- subset(police_df_miss, is.na(pred_whi)==T)
+police_coord_missing_surname <- subset(police_coord_missing, is.na(pred_whi)==T)
+### now remove the missing data from the prior sets 
+police_df_miss <- subset(police_df_miss, is.na(pred_whi)==F)
+police_coord_missing <- subset(police_coord_missing, is.na(pred_whi)==F)
+
+### run the wru command for surname alone 
+police_df_miss_surname <- predict_race(police_df_miss_surname, surname.only = T)
+police_coord_missing_surname <- predict_race(police_coord_missing_surname, surname.only = T)
+
+### bind the data 
+police_df_miss_surname <- rbind(police_df_miss_surname,police_coord_missing_surname )
+
+### now, fix teh column names 
+police_df_miss_surname <- subset(police_df_miss_surname, 
+                                 select=-c(pred_whi,pred_bla,pred_his,pred_asi,pred_oth))
+## change the names from wru alone 
+colnames(police_df_miss_surname)[grepl("pred.", colnames(police_df_miss_surname))] <-
+  str_replace_all(colnames(police_df_miss_surname)[grepl("pred.", colnames(police_df_miss_surname))], "pred.", "pred_")
+### now combine all of the data 
+police_df_slim_final <- rbind(police_df_slim,police_df_miss,police_coord_missing,police_df_miss_surname )
+
+#### good, now save 
+saveRDS(police_df_slim_final, "data/police_df_slim_final.rds")
+rm(police_df_slim,police_df_miss,police_coord_missing,police_df_miss_surname)
+
+```
+
+
+## Merging on county covariates 
+
+```{r matching onto metro areas}
+
+### read in the county data 
+county_acs <- read.csv("data/complete_county_data.csv")
+police_df_slim_final <- readRDS("data/police_df_slim_final.rds")
+### select in the vars we want; gini, race, income 
+county_acs_slim <- subset(county_acs, select=c(Geo_FIPS,Geo_NAME,Geo_STUSAB,total_pop,pop_ppsm,gini_index,
+                                               white_pct,black_pct,asianpi_pct,hispanic_pct,other_pct,
+                                               median_income,metro_type,duncan_index))
+
+### change names 
+colnames(county_acs_slim)[1:3] <- c("county_fips","county_name","state_po")
+
+## remove county 
+county_acs_slim$county_name <- str_remove(county_acs_slim$county_name, "County")
+county_acs_slim$county_name <- str_remove(county_acs_slim$county_name, "Parish")
+
+## make upper case 
+county_acs_slim$county_name <- str_to_upper(county_acs_slim$county_name)
+county_acs_slim$state_po <- str_to_upper(county_acs_slim$state_po)
+county_acs_slim$county_name <- trimws(county_acs_slim$county_name)
+
+# 02270, 46113 , 46113
+### fix the odd fips error in the county data for SD 
+county_acs_slim$county_fips[county_acs_slim$county_fips=="46102"] <- "46113" 
+
+## str width for fips 
+county_acs_slim$county_fips <- str_pad(county_acs_slim$county_fips,width=5,side="left",pad="0")
+
+## make upper case for the police data 
+police_df_slim_final$County <- str_to_upper(police_df_slim_final$County)
+
+### get county fips for the police df 
+police_df_slim_final$county_fips <- substr(police_df_slim_final$Geo_FIPS,1,5)
+
+## some of the police Alaska data off; fix 
+police_df_slim_final$county_fips[police_df_slim_final$county_fips=="02270"] <- "02158"
+
+
+### split on if fips present 
+police_df_slim_final_nofips <- subset(police_df_slim_final, is.na(county_fips)==T)
+police_df_slim_final_fips <- subset(police_df_slim_final, is.na(county_fips)==F)
+
+### merge based on fips 
+police_df_slim_final_test <- merge(police_df_slim_final_fips,county_acs_slim, by=c("county_fips"),all.x=T)
+
+### now merge on by name 
+
+##change names in police data 
+colnames(police_df_slim_final_nofips)[colnames(police_df_slim_final_nofips)=="County"] <- "county_name"
+colnames(police_df_slim_final_nofips)[colnames(police_df_slim_final_nofips)=="State"] <- "state_po"
+
+##check if the merge works 
+police_df_slim_final_testnofips <- merge(police_df_slim_final_nofips,county_acs_slim,  
+                                         by=c("county_name","state_po"),all.x=T)
+
+### now, get the data combined 
+police_df_slim_final_test <- subset(police_df_slim_final_test, select=-c(County,State))
+police_df_slim_final_testnofips <- subset(police_df_slim_final_testnofips, select=-c(county_fips.x))
+colnames(police_df_slim_final_testnofips)[colnames(police_df_slim_final_testnofips)=="county_fips.y"] <-
+  "county_fips"
+
+police_df_slim_final <- rbind(police_df_slim_final_test,police_df_slim_final_testnofips )
+
+## after this long process, save the data 
+saveRDS(police_df_slim_final, "data/police_df_slim_final_w_county_acs.rds")
+
+
+
+
+metro_df <- readRDS("data/metro_seg_full_df.rds")
+zip_seg <- readRDS("data/zip_code_segregation_df.rds")
+
+
+```
+
+# Validation 
+
+Now that we have the race predicted on the MPV data, lets get the stats on how accurate the BISG process was. 
+
+```{r validation}
+### read in the merged police data 
+police_df_slim_final <- readRDS("data/police_df_slim_final_w_county_acs.rds")
+
+### create new official race official data
+table(police_df_slim_final$Victim.s.race)
+police_df_slim_final$race_simp <- "white"
+police_df_slim_final$race_simp[police_df_slim_final$Victim.s.race=="Black"] <- "black"
+police_df_slim_final$race_simp[police_df_slim_final$Victim.s.race=="Asian"] <- "asian/pi"
+police_df_slim_final$race_simp[police_df_slim_final$Victim.s.race=="Pacific Islander"] <- "asian/pi"
+police_df_slim_final$race_simp[police_df_slim_final$Victim.s.race=="Hispanic"] <- "hispanic"
+police_df_slim_final$race_simp[police_df_slim_final$Victim.s.race=="Native American"] <- "other"
+police_df_slim_final$race_simp[police_df_slim_final$Victim.s.race=="Unknown race"] <- "unknown"
+
+### collapse the data 
+police_df_slim_final_col <- police_df_slim_final %>%
+  group_by(race_simp) %>%
+  summarise(white=sum(pred_whi),black=sum(pred_bla), hispanic=sum(pred_his) ,asian=sum(pred_asi),
+            other=sum(pred_oth))
+### get total 
+total_num <- rowSums(police_df_slim_final_col[,2:6])
+## get pcts 
+police_df_slim_final_col_pct <- (police_df_slim_final_col[,2:6]/total_num)*100
+
+## bind prior df first col 
+police_df_slim_final_col_pct <- cbind(police_df_slim_final_col[,1],police_df_slim_final_col_pct)
+
+### now make long 
+police_df_slim_final_col_pct_long <- police_df_slim_final_col_pct %>%
+  pivot_longer(!race_simp, names_to="predicted_race", values_to = "percent" )
+police_df_slim_final_col_pct_long$percent <- round(police_df_slim_final_col_pct_long$percent,1)
+
+### now, let's look at diffs in overall counts 
+
+overall_race_diff <- ggplot(police_df_slim_final_col_pct_long, aes(fill=predicted_race, y=percent, x=race_simp, label=percent)) + 
+    geom_bar(position="dodge", stat="identity") + theme_minimal() +ylim(0,100) +
+  labs(title="Percent composition of BISG predicted race by MPV recorded race", 
+       x="MPV recorded race", 
+       y="Percent",fill="BISG race",
+       caption=paste0("Note: x-axis notes the victim's recorded race as per the Mapping Police Violence data. 
+       The bars reflect the aggregated weighted probabilities of BISG estimates.
+       Data downloaded: 10/24/2022. N = ", sum(total_num) )) +
+    geom_text(position = position_dodge(width = .9),    # move to center of bars
+              vjust = -0.5,    # nudge above top of bar
+              size = 2) 
+  
+
+overall_race_diff
+
+
+
+
+```
+## Breaking the results down by police withholding name 
+
+Looking at the data, we see that the imputations are mostly accurate, but not perfect. Notably, there is an underestimate for the number of African American victims. Therefore, one basic check is the level by which these results arose. Overall, we see that most of the times that names were withheld -- at 179 cases -- were when the race of the victim was also unknown. There is suggestive evidence that withholding the surname for victims of Hispanic descent does greatly reduce the accuracy of BISG. While few in number, the cases where the police withheld an African American victim's name appears to exhibit greater accuracy. However, the data are too few. 
+
+```{r level of prediction}
+## collapse the data 
+police_df_slim_final_col <- police_df_slim_final %>%
+  group_by(race_simp,name_withheld) %>%
+  summarise(white=sum(pred_whi),black=sum(pred_bla), hispanic=sum(pred_his) ,asian=sum(pred_asi),
+            other=sum(pred_oth))
+### get total 
+total_num <- rowSums(police_df_slim_final_col[,3:7])
+## get pcts 
+police_df_slim_final_col_pct <- round((police_df_slim_final_col[,3:7]/total_num)*100,2)
+
+## bind prior df first col 
+police_df_slim_final_col_pct <- cbind(police_df_slim_final_col[,1:2],total_num, police_df_slim_final_col_pct)
+colnames(police_df_slim_final_col_pct)[3] <- "total_num"
+
+### change name withheld 
+police_df_slim_final_col_pct$name_withheld[police_df_slim_final_col_pct$name_withheld==0] <- "Provided"
+police_df_slim_final_col_pct$name_withheld[police_df_slim_final_col_pct$name_withheld==1] <- "Withheld"
+
+## present the table 
+knitr::kable(police_df_slim_final_col_pct, caption="Accuracy of BISG relative to MPV by whether name was 
+             withheld.")
+
+
+```
+
+## Anlyzing error via multi-level modeling  
+There is reason to believe that there are unobserved features that predict error. While we will keep analyses simple here for now, it might be the case that factors such as segregation lead to bias in results. Where segregation occurs, the aggregated levels of geography become less informative due to clustering, which can likewise lead to bias. Additionally, highly segregated areas might see the type of racial animus associated with police violence. Therefore, we explore the likelihood of error with a simple multilevel logistic regression. We will employ random intercepts by county. The outcome of interest is whether the plurality BISG estimated race matches the MPV recorded race. We will exclude the unknown race, since we cannot validate against these observations. 
+
+Of interest will be the segregation index, recorded via the Duncan-Duncan index. The measure incorporates spatial adjacency on what proportion of the county would need to move in order to make every Census Block Group a microcosm of the county. Scores near 0 equate to no segregation, and scores near 1 equate to complete segregation. I acquired these data from the county ACS data, which I created from my time at the MIT Elections Data and Science Lab in 2020. 
+
+Other variables of interest at the county level are  the gini index, with scores near 0 reflecting complete equality and scores near 1 reflecting complete inequality. We likewise will incorporate metro type, defined by the National Center for Health Statistics' 2013 urban-rural classification scheme of counties. These include: Large metro, medium metro, small metro, micropolitan, and non-core (rural) areas. 
+
+The results demonstrate the segregation score reaches statistical significance (p<0.01). I proceed to simulate the betas of the model in order to predict the variance in predicted probability across the range of segregation scores. Moving from the least segregated to most segregated counties decreases the probability of a correct match by approximately 36 percentage points. Moving across the interquartile range of the segregation score reduces the accuracy by approximately four percentage points. 
+
+
+```{r multilevel model}
+
+## change the pred_ names in order to get the plural estimates easily 
+police_df_slim_final <- readRDS("data/police_df_slim_final_w_county_acs.rds")
+
+### use the herfindahl fxn to get plural race 
+police_df_slim_final <- race_herfindahl_scores2(police_df_slim_final)
+
+### make the names match 
+police_df_slim_final$race_simp <- "white"
+police_df_slim_final$race_simp[police_df_slim_final$Victim.s.race=="Black"] <- "black"
+police_df_slim_final$race_simp[police_df_slim_final$Victim.s.race=="Asian"] <- "asian"
+police_df_slim_final$race_simp[police_df_slim_final$Victim.s.race=="Pacific Islander"] <- "asian"
+police_df_slim_final$race_simp[police_df_slim_final$Victim.s.race=="Hispanic"] <- "hispanic"
+police_df_slim_final$race_simp[police_df_slim_final$Victim.s.race=="Native American"] <- "other"
+police_df_slim_final$race_simp[police_df_slim_final$Victim.s.race=="Unknown race"] <- "unknown"
+
+### now have the plural_race; match 
+police_df_slim_final <- subset(police_df_slim_final,race_simp != "unknown"  )
+
+### create dummy var 
+police_df_slim_final$race_match <- 0
+police_df_slim_final$race_match[police_df_slim_final$race_simp==police_df_slim_final$plural_race] <- 1
+
+### get summary
+summary(police_df_slim_final$race_match) # same 77% of time 
+quantile(police_df_slim_final$duncan_index, c(0.25,0.5,0.75), na.rm=T)
+### create mlm model 
+conflicts_prefer(arm::logit)
+# commented out model for time; uncomment out to read back in 
+#race_model <- glmer(race_match ~ duncan_index + gini_index +  
+#                      as.factor(metro_type) + (1|county_fips), data=police_df_slim_final, 
+#                      family=binomial(link=logit)  )
+# saveRDS(race_model, "data/models/race_model_re.rda")
+race_model <- readRDS("data/models/race_model_re.rda")
+summary(race_model)
+
+
+### now plot the results 
+set.seed(1337)
+random_beta_draws <- mvrnorm(10000, mu=fixef(race_model), Sigma=vcov.merMod(race_model))
+
+### now, proceed to create a df to predict upon 
+seg_seq <- seq(0,1,by=0.01) # create range for seg 
+df_apply <- data.frame(cbind(1,seg_seq, mean(police_df_slim_final$gini_index, na.rm=T),1,0,0,0))
+                 
+### apply with matrix mult 
+pred_probs <- as.matrix(df_apply) %*% t(random_beta_draws)
+## now, apply the results 
+pred_probs <- inv.logit(pred_probs)
+pred_prob_df <-apply(pred_probs, 1,quantile, probs=c(0.025,.5,.975) )
+dim(pred_prob_df)
+
+## #now lets get into a nic df 
+pred_prob_df <- t(pred_prob_df)
+pred_prob_df <- as.data.frame(pred_prob_df)
+colnames(pred_prob_df) <- c("low_ci","median_est","upp_ci")
+pred_prob_df <- cbind(pred_prob_df, seg_seq)
+colnames(pred_prob_df)[4] <- "segregation"
+
+### now, plot the results 
+segreg_ggplot_reg <- ggplot(pred_prob_df, aes(x=segregation, y=median_est)) +
+  geom_line(lwd=1.2) + 
+  geom_ribbon(aes(ymin=low_ci,ymax=upp_ci), alpha=0.4) + #### very important command; makes the CIs 
+  theme_minimal() + ## cleans up the presentation of the plot 
+  ylim(0,1) + labs(title="Probability of correct racial match given segregation", x="Duncan-Duncan spatial segregation score (0 = low seg., 1= complete seg.)",
+       y="Predicted prob.", 
+       caption="The overall accuracy in BISG racial estimates of MPV data matching actual race. N = 8959
+       Density plot reflects the distribution of the segregation score."
+       ) + 
+  geom_density(police_df_slim_final, mapping= aes(x=duncan_index,y=..scaled..), fill="gray90", alpha=0.2) + 
+  theme(plot.caption = element_text(hjust = 0))
+segreg_ggplot_reg
+
+```
+## Precision 
+
+```{r precision}
+
+### collapse the data 
+police_df_slim_final_col <- police_df_slim_final %>%
+  group_by(plural_race,race_simp) %>%
+  tally()
+### get total 
+total_num <- sum(police_df_slim_final_col$n)
+## get pcts; mutate
+police_df_slim_final_col <- police_df_slim_final_col %>%
+  group_by(plural_race) %>%
+  group_by(plural_sum=sum(n))
+police_df_slim_final_col$pct <- round((police_df_slim_final_col$n/police_df_slim_final_col$plural_sum)*100,1)
+
+
+
+### let's create a ggplot 
+overall_precision_plot <- ggplot(police_df_slim_final_col, aes(fill=race_simp, y=pct, x=plural_race, label = (pct))) + 
+    geom_bar(position="dodge", stat="identity") + theme_minimal() +ylim(0,100) +
+  labs(title="Percent composition of BISG predicted race by MPV recorded race", 
+       x="BISG plurality estimated race", 
+       y="Percent",
+       caption=paste0("Note: x-axis notes the victim's recorded race as per the Mapping Police Violence data. 
+       The bars reflect the aggregated weighted probabilities of BISG estimates.
+       Data downloaded: 10/24/2022. N = ", sum(total_num) ), fill="MPV race" ) +
+  geom_text(position = position_dodge(width = .9),    # move to center of bars
+              vjust = -0.5,    # nudge above top of bar
+              size = 2) 
+overall_precision_plot
+
+
+```
+
+# Appendix 
+
+
+
