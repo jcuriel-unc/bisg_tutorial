@@ -1,0 +1,105 @@
+%\usetheme{Rochester}
+
+\RequirePackage{pgf}
+%% want 4159 x 544
+\pgfdeclareimage[width=1.0\paperwidth]{onu_template}{onu_template2}
+
+\setbeamertemplate{blocks}[rounded][shadow=true]
+\setbeamercovered{transparent}
+
+\beamer@headheight=0.13\paperwidth
+
+\definecolor{uncblue}{HTML}{f26b27}
+\definecolor{oxygengray}{HTML}{686868}
+\definecolor{oxygenlightgray}{HTML}{eeeeee}
+\setbeamercolor*{Title bar}{fg=black}
+\setbeamercolor*{Location bar}{fg=uncblue,bg=oxygenlightgray}
+\setbeamercolor*{frametitle}{parent=Title bar}
+\setbeamercolor*{block title}{bg=uncblue,fg=black}
+\setbeamercolor*{block body}{bg=oxygenlightgray,fg=oxygengray}
+\setbeamercolor*{normal text}{bg=white,fg=black}
+%\setbeamercolor*{normal text}{bg=white,fg=oxygengray}  %% switched to above (black) 01-05-09
+\setbeamercolor*{section in head/foot}{bg=uncblue,fg=white}
+
+\usecolortheme[named=uncblue]{structure}
+
+
+\setbeamerfont{section in head/foot}{size=\tiny,series=\normalfont}
+\setbeamerfont{frametitle}{size=\large,series=\normalfont}  %% Switched from \Large 01-05-09
+
+%\setbeamertemplate{headline}
+\setbeamertemplate{frametitle}
+{
+  \vskip-0.25\beamer@headheight
+  \vskip-\baselineskip
+  \vskip0.4cm
+  \hskip1.7cm\usebeamerfont*{frametitle}\insertframetitle
+  \vskip-.10em
+  \hskip0.7cm\usebeamerfont*{framesubtitle}\insertframesubtitle
+}
+
+\setbeamertemplate{headline}
+{
+  \pgfuseimage{onu_template}
+  \vskip -1.7cm
+  \linethickness{0pt}
+
+  \framelatex{
+  \begin{beamercolorbox}[wd=\paperwidth,ht=0.3\beamer@headheight]{Title bar}
+    \usebeamerfont{section in head/foot}%
+    \insertsectionnavigationhorizontal{0pt}{\hskip0.22cm}{}%
+  \end{beamercolorbox}}
+
+  \framelatex{
+  \begin{beamercolorbox}[wd=\paperwidth,ht=0.7\beamer@headheight]{Title bar}
+  \end{beamercolorbox}}
+}
+
+%%% attempt to create a short title cmd here
+%\newcommand\@shorttitle{}
+% define \theshorttitle to what is given
+%\newcommand\shorttitle[1]{\renewcommand\@shorttitle{#1}}
+
+
+\setbeamertemplate{footline}
+{
+  \linethickness{0.25pt}
+  \framelatex{
+  \begin{beamercolorbox}[leftskip=.3cm,wd=\paperwidth,ht=0.3\beamer@headheight,sep=0.1cm]{Location bar}
+    \usebeamerfont{section in head/foot}%
+    \insertshortauthor~|~\insertshorttitle
+    \hfill
+    \insertframenumber/\inserttotalframenumber
+  \end{beamercolorbox}}
+}
+%%%% use packages of interest 
+\usepackage{graphicx}
+\usepackage{booktabs} % For tables
+\usepackage{amsmath}
+\usepackage{natbib}
+\usepackage{adjustbox}
+\usepackage{subfigure}	%kirkland
+\usepackage{color}
+\usepackage{wrapfig}
+\usepackage{bigints}  % for large integrands
+\usepackage{beamerthemeUNC} % for braces on beta continuum
+\usepackage{tikz}
+\usepackage{tkz-graph}
+
+%% FUNNY COMMANDS FOR EASE %%
+%% These are my funny commands for typing math; feel free to ignore them:
+\newcommand{\bm}[1]{\boldsymbol{#1}} %makes bold math symbols easier
+\newcommand{\R}{\textsf{R}} %R in textsf font
+\newcommand{\iid}{i.i.d.} %easier to type i.i.d.
+\newcommand{\RF}{\texttt{R}}
+\newcommand{\rft}[1]{\texttt{#1}}
+\newcommand{\thismeans}{$~~\Longrightarrow~~$}
+\newcommand{\such}{$~$ | $~$}
+\newcommand{\apoint}{\hspace{0.1in}$\triangleright$~}
+\newcommand{\rdot}{$(\cdot)$}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%\usepackage[backend=biber, style=numeric]{biblatex}
+%\addbibresource{CurielDeLuca_refs.bib}
+
+%% VERBATIM ENVIRONMENT
+\usepackage{moreverb}
