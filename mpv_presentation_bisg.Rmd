@@ -57,7 +57,7 @@ for (i in pkg){
     print(paste(i, "is loaded correctly"))
   } else{
     print(paste("trying to install", i))
-    install.packages(i)
+    install.packages(i, repos = "http://cran.us.r-project.org")
     if(require(i, character.only=TRUE)){
       print(paste(i, "installed and loaded"))
     } else{
