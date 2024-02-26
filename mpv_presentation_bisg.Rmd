@@ -49,7 +49,7 @@ knitr::include_graphics("images/install_chunk.png")
 ### check for packages 
 pkg <- c("stringr","stringi","tidyverse","foreign","conflicted","data.table","raster","gtools",
          "ggplot2","ggpubr","rstudioapi","scales","splitstackshape","devtools",
-         "tidyr","devtools", "sf", "geojsonio","lme4","arm","MASS","knitr")
+         "tidyr","devtools", "sf", "geojsonio","lme4","arm","MASS","knitr","wru")
 
 for (i in pkg){
   print(i)

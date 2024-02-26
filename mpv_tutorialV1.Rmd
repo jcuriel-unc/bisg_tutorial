@@ -16,7 +16,7 @@ The first step when employing BISG is to install the relevant packages. For BISG
 ### check for packages 
 pkg <- c("stringr","stringi","tidyverse","foreign","conflicted","data.table","raster","gtools",
          "sp","reshape2","ggplot2","ggpubr","rstudioapi","scales","splitstackshape",
-         "tidyr","devtools", "sf", "geojsonio","devtools")
+         "tidyr","devtools", "sf", "geojsonio","devtools","wru")
 
 for (i in pkg){
   print(i)
