@@ -380,7 +380,8 @@ police_coord_missing <- subset(police_coord_missing, is.na(pred_whi)==F)
 ```{r bisg on surname alone, warning=FALSE,message=FALSE}
 
 ### run the wru command for surname alone 
-police_df_miss_surname <- predict_race(police_df_miss_surname, surname.only = T)
+police_df_miss_surname <- predict_race(police_df_miss_surname,
+                                       surname.only = T)
 police_coord_missing_surname <- predict_race(police_coord_missing_surname, surname.only = T)
 ### bind the data 
 police_df_miss_surname <- rbind(police_df_miss_surname,police_coord_missing_surname )
