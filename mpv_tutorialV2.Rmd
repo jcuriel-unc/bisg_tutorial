@@ -12,11 +12,11 @@ The goal of this module is to learn how to implement Bayesian Improved Surname G
 
 The first step when employing BISG is to install the relevant packages. For BISG, we specifically want the "wru" package ("Who are you?") by Imai and Khanna (2016) in addition to zipWRUext2 by Clark, Curiel and Steelman (2021) for ease of use. Note, because zipWRUext2 relies in part upon the surname dictionary provided by Imai and Khanna's version 0.1-12, the "special install" section in the block of code below shall ensure that the appropriate version is installed, thereby preventing issues with imputation later on. 
 
-```{r install pkgs, include=TRUE, results='hide',message=FALSE,warning=FALSE}
+```{r setup, include=TRUE, results='asis'}
 ### check for packages 
-pkg <- c("stringr","stringi","tidyverse","foreign","conflicted","data.table","raster","gtools","rgdal",
-         "ggplot2","ggpubr","rstudioapi","rgeos","scales","splitstackshape",
-         "tidyr","devtools", "sf", "geojsonio","lme4","arm","MASS","knitr")
+pkg <- c("stringr","stringi","tidyverse","foreign","conflicted","data.table","raster","gtools",
+         "sp","reshape2","ggplot2","ggpubr","rstudioapi","scales","splitstackshape",
+         "tidyr","devtools", "sf", "geojsonio")
 
 for (i in pkg){
   print(i)
@@ -24,7 +24,7 @@ for (i in pkg){
     print(paste(i, "is loaded correctly"))
   } else{
     print(paste("trying to install", i))
-    install.packages(i)
+    install.packages(i,repos = "http://cran.us.r-project.org")
     if(require(i, character.only=TRUE)){
       print(paste(i, "installed and loaded"))
     } else{
@@ -59,9 +59,9 @@ if(require("wru", character.only=TRUE) & as.numeric(substr(packageVersion("wru")
 library(foreign)
 library(tidyverse)
 library(dplyr)
+library(sp) # basic spatial object handling
 library(raster) # raster (pixel) object handling
-library(rgdal) # shapefile access
-library(rgeos) # geometry operations
+library(reshape2)
 library(stringi) # text processing 
 library(stringr) # text processing 
 library(splitstackshape)
@@ -70,11 +70,7 @@ library(ggplot2)
 library(scales)
 library(conflicted)
 library(geojsonio)
-library(sf) # simple features for spatial objects 
-library(lme4)
-library(arm)
-library(MASS)
-library(knitr)
+library(sf)
 ##install the arealOverlap pkg 
 #devtools::install_github("https://github.com/jcuriel-unc/arealOverlap2",subdir="arealOverlap")
 #library(arealOverlap)
@@ -82,34 +78,11 @@ library(wru)
 ##install the zipWRUext2 pkg 
 #devtools::install_github("https://github.com/jcuriel-unc/zipWRUext",subdir="zipWRUext2")
 library(zipWRUext2)
-
-### fxn from zipWRUext; revises to be more flexible than v1 ### 
+## set directory 
+data_wd <- dirname(rstudioapi::getActiveDocumentContext()$path)
+setwd(data_wd)
 substrRight <- function(x, n){
   substr(x, nchar(x)-n+1, nchar(x))
-}
-### revision of herfindahl fxn from zipWRUext
-race_herfindahl_scores2 <- function (dataframe1) 
-{
-  if (any(colnames(dataframe1) == "pred_whi") == FALSE) {
-    stop("Predicted race variable not present.")
-  }
-  predNames <- c("pred_whi", "pred_bla", "pred_his", 
-                 "pred_asi", "pred_oth")
-  dataframe1 <- as.data.frame(dataframe1)
-  dataframe1$herf_weight <- (dataframe1$pred_whi)^2 + (dataframe1$pred_bla)^2 + 
-    (dataframe1$pred_his)^2 + (dataframe1$pred_asi)^2 + (dataframe1$pred_oth)^2
-  dataframe_sub <- subset(dataframe1, select = c(pred_whi, 
-                                                 pred_bla, pred_his, pred_asi, pred_oth))
-  prob_matrix <- as.matrix(dataframe_sub)
-  prob_matrix2 <- apply(prob_matrix, 1, max)
-  dataframe1 <- cbind(dataframe1, prob_matrix2)
-  colnames(dataframe1)[colnames(dataframe1) == "prob_matrix2"] <- "max_race_prob"
-  dataframe1$plural_race[dataframe1$pred_whi == dataframe1$max_race_prob] <- "white"
-  dataframe1$plural_race[dataframe1$pred_bla == dataframe1$max_race_prob] <- "black"
-  dataframe1$plural_race[dataframe1$pred_his == dataframe1$max_race_prob] <- "hispanic"
-  dataframe1$plural_race[dataframe1$pred_asi == dataframe1$max_race_prob] <- "asian"
-  dataframe1$plural_race[dataframe1$pred_oth == dataframe1$max_race_prob] <- "other"
-  return(dataframe1)
 }
 
 ```

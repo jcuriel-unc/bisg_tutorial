@@ -14,9 +14,9 @@ The first step when employing BISG is to install the relevant packages. For BISG
 
 ```{r setup, include=TRUE, results='asis'}
 ### check for packages 
-pkg <- c("stringr","stringi","tidyverse","foreign","conflicted","data.table","raster","gtools","rgdal",
-         "sp","redist","reshape2","ggplot2","ggpubr","rstudioapi","rgeos","scales","splitstackshape",
-         "tidyr","devtools", "sf", "geojsonio")
+pkg <- c("stringr","stringi","tidyverse","foreign","conflicted","data.table","raster","gtools",
+         "sp","reshape2","ggplot2","ggpubr","rstudioapi","scales","splitstackshape",
+         "tidyr","devtools", "sf", "geojsonio","devtools")
 
 for (i in pkg){
   print(i)
@@ -24,7 +24,7 @@ for (i in pkg){
     print(paste(i, "is loaded correctly"))
   } else{
     print(paste("trying to install", i))
-    install.packages(i)
+    install.packages(i,repos = "http://cran.us.r-project.org")
     if(require(i, character.only=TRUE)){
       print(paste(i, "installed and loaded"))
     } else{
@@ -61,8 +61,6 @@ library(tidyverse)
 library(dplyr)
 library(sp) # basic spatial object handling
 library(raster) # raster (pixel) object handling
-library(rgdal) # shapefile access
-library(rgeos) # geometry operations
 library(reshape2)
 library(stringi) # text processing 
 library(stringr) # text processing 
@@ -78,7 +76,7 @@ library(sf)
 #library(arealOverlap)
 library(wru)
 ##install the zipWRUext2 pkg 
-#devtools::install_github("https://github.com/jcuriel-unc/zipWRUext",subdir="zipWRUext2")
+devtools::install_github("https://github.com/jcuriel-unc/zipWRUext",subdir="zipWRUext2")
 library(zipWRUext2)
 ## set directory 
 data_wd <- dirname(rstudioapi::getActiveDocumentContext()$path)

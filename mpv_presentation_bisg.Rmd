@@ -47,8 +47,8 @@ knitr::include_graphics("images/install_chunk.png")
 
 ```{r install pkgs, include=FALSE, results='hide',message=FALSE,warning=FALSE}
 ### check for packages 
-pkg <- c("stringr","stringi","tidyverse","foreign","conflicted","data.table","raster","gtools","rgdal",
-         "ggplot2","ggpubr","rstudioapi","rgeos","scales","splitstackshape",
+pkg <- c("stringr","stringi","tidyverse","foreign","conflicted","data.table","raster","gtools",
+         "ggplot2","ggpubr","rstudioapi","scales","splitstackshape","devtools",
          "tidyr","devtools", "sf", "geojsonio","lme4","arm","MASS","knitr")
 
 for (i in pkg){
@@ -93,8 +93,6 @@ library(foreign)
 library(tidyverse)
 library(dplyr)
 library(raster) # raster (pixel) object handling
-library(rgdal) # shapefile access
-library(rgeos) # geometry operations
 library(stringi) # text processing 
 library(stringr) # text processing 
 library(splitstackshape)
@@ -113,7 +111,7 @@ library(knitr)
 #library(arealOverlap)
 library(wru)
 ##install the zipWRUext2 pkg 
-#devtools::install_github("https://github.com/jcuriel-unc/zipWRUext",subdir="zipWRUext2")
+devtools::install_github("https://github.com/jcuriel-unc/zipWRUext",subdir="zipWRUext2")
 library(zipWRUext2)
 
 ### fxn from zipWRUext; revises to be more flexible than v1 ### 
