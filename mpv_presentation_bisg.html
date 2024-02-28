@@ -3499,17 +3499,20 @@ police$full_name[police$full_name==&quot;Name withheld by police&quot;] &lt;-
 ### get rid of punctuation 
 police$full_name &lt;- gsub(&quot;[[:punct:]]&quot;, &quot; &quot;, police$full_name ) 
 
-## get rid of various suffixes 
-police$full_name &lt;- str_replace_all(police$full_name, &quot; IV&quot;, &quot;&quot;)
-police$full_name &lt;- str_replace_all(police$full_name, &quot; III&quot;, &quot;&quot;)
-police$full_name &lt;- str_replace_all(police$full_name, &quot; II&quot;, &quot;&quot;)
-police$full_name &lt;- str_replace_all(police$full_name, &quot; Jr&quot;, &quot;&quot;)
-police$full_name &lt;- str_replace_all(police$full_name, &quot; Sr&quot;, &quot;&quot;)</pre>
+suffix_vec &lt;- c(&quot; IV&quot;, &quot; III&quot;, &quot; II&quot;, &quot; Jr&quot;, &quot; Sr&quot;)
+
+## loop through to get rid of suffixes 
+for (i in 1:length(suffix_vec)) {
+  police$full_name &lt;- 
+    str_replace_all(police$full_name,suffix_vec[i], &quot;&quot; )
+  
+}</pre>
 
 </article></slide><slide class=""><hgroup><h2>Splitting names part 1</h2></hgroup><article  id="splitting-names-part-1">
 
 <pre class = 'prettyprint lang-r'>### now work on splitting names 
-police$first_name &lt;- sapply(strsplit(police$full_name, &quot; &quot;), `[`, 1) # for first name, we are grabbing the portion that is first before the space split. 
+police$first_name &lt;- sapply(strsplit(police$full_name, &quot; &quot;), `[`, 1) 
+# for first name, we are grabbing the portion that is first before the space split. 
 # we can likewise see this by going with the &quot;Noah A Smith&quot; example 
 sapply(strsplit(&quot;Noah A Smith&quot;, &quot; &quot;), `[`, 1)  </pre>
 
@@ -3525,14 +3528,13 @@ sub(&quot;.* &quot;, &quot;&quot;, &quot;Noah A Smith&quot;) ## we will see what
 
 </article></slide><slide class=""><hgroup><h2>Splitting names part 2</h2></hgroup><article  id="splitting-names-part-2">
 
-<pre class = 'prettyprint lang-r'>summary(police$name_length)  </pre>
+<pre class = 'prettyprint lang-r'>print(summary(police$name_length))  </pre>
 
 <p>Min. 1st Qu. Median Mean 3rd Qu. Max. 2.000 2.000 2.000 2.554 3.000 8.000</p>
 
 <pre class = 'prettyprint lang-r'>### assign middle name of &quot;A&quot; based on if 2 length
 police$middle_name &lt;- sapply( strsplit(police$full_name, &quot; &quot;), tail, 1)
 police$middle_name[police$name_length==2] &lt;- &quot;A&quot;
-
 head(police$last_name)</pre>
 
 <p>[1] &ldquo;Smith&rdquo; &ldquo;Smith&rdquo; &ldquo;Smith&rdquo; &ldquo;Flowers&rdquo; &ldquo;Smith&rdquo; &ldquo;Smith&rdquo;</p>
@@ -3690,7 +3692,8 @@ sum(is.na(police_coord_missing$pred_whi)) # 13 </pre>
 </article></slide><slide class=""><hgroup><h2>BISG with surname alone</h2></hgroup><article  id="bisg-with-surname-alone">
 
 <pre class = 'prettyprint lang-r'>### run the wru command for surname alone 
-police_df_miss_surname &lt;- predict_race(police_df_miss_surname, surname.only = T)</pre>
+police_df_miss_surname &lt;- predict_race(police_df_miss_surname,
+                                       surname.only = T)</pre>
 
 <pre >## [1] &quot;Proceeding with surname-only predictions...&quot;</pre>
 

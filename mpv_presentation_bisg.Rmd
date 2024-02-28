@@ -193,12 +193,14 @@ police$full_name[police$full_name=="Name withheld by police"] <-
 ### get rid of punctuation 
 police$full_name <- gsub("[[:punct:]]", " ", police$full_name ) 
 
-## get rid of various suffixes 
-police$full_name <- str_replace_all(police$full_name, " IV", "")
-police$full_name <- str_replace_all(police$full_name, " III", "")
-police$full_name <- str_replace_all(police$full_name, " II", "")
-police$full_name <- str_replace_all(police$full_name, " Jr", "")
-police$full_name <- str_replace_all(police$full_name, " Sr", "")
+suffix_vec <- c(" IV", " III", " II", " Jr", " Sr")
+
+## loop through to get rid of suffixes 
+for (i in 1:length(suffix_vec)) {
+  police$full_name <- 
+    str_replace_all(police$full_name,suffix_vec[i], "" )
+  
+}
 ```
 
 
@@ -219,7 +221,8 @@ police$mpv_id2 <- seq.int(1,nrow(police),by=1)
 ## Splitting names part 1
 ```{r splitting names part 1,include=TRUE,results='asis'}
 ### now work on splitting names 
-police$first_name <- sapply(strsplit(police$full_name, " "), `[`, 1) # for first name, we are grabbing the portion that is first before the space split. 
+police$first_name <- sapply(strsplit(police$full_name, " "), `[`, 1) 
+# for first name, we are grabbing the portion that is first before the space split. 
 # we can likewise see this by going with the "Noah A Smith" example 
 sapply(strsplit("Noah A Smith", " "), `[`, 1)  
 
@@ -227,19 +230,16 @@ police$last_name <- sub(".* ", "", police$full_name)
 # for last name, we are pulling the last portion of the full name 
 sub(".* ", "", "Noah A Smith") ## we will see what it does to name here; note, the name "Smith" is grabbed. 
 #looks like most do not have middle names ;
-
 ```
 
 ## Splitting names part 2
 ```{r splitting names part 2,include=TRUE,results='asis'}
 
-summary(police$name_length)  
+print(summary(police$name_length))  
 ### assign middle name of "A" based on if 2 length
 police$middle_name <- sapply( strsplit(police$full_name, " "), tail, 1)
 police$middle_name[police$name_length==2] <- "A"
-
 head(police$last_name)
-
 ```
 
 ## Prepping the geographic component 
